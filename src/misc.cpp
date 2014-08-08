@@ -100,6 +100,27 @@ tf::Transform g2o2TF(const g2o::SE3Quat se3) {
     return result;
 }
 
+tf::Transform values2TF(float tx, float ty, float tz, float rx, float ry, float rz, float rw) {
+    tf::Transform result;
+    tf::Vector3 translation;
+    translation.setX(tx);
+    translation.setY(ty);
+    translation.setZ(tz);
+
+    tf::Quaternion rotation;
+    rotation.setX(rx);
+    rotation.setY(ry);
+    rotation.setZ(rz);
+    rotation.setW(rw);
+
+    result.setOrigin(translation);
+    result.setRotation(rotation);
+    //printTransform("from conversion", result);
+    return result;
+}
+
+
+
 #ifdef HEMACLOUDS
 void transformAndAppendPointCloud (const pointcloud_type &cloud_in, 
                                    pcl::PointCloud<hema::PointXYZRGBCamSL> &cloud_to_append_to,
@@ -569,6 +590,30 @@ pointcloud_type* createXYZRGBPointCloud (const cv::Mat& depth_img,
   float fy = 1./ (ps->get<double>("depth_camera_fy") > 0 ? ps->get<double>("depth_camera_fy") : cam_info->K[4]); //(cloud->width >> 1) - 0.5f;
   float cx = ps->get<double>("depth_camera_cx") > 0 ? ps->get<double>("depth_camera_cx") : cam_info->K[2]; //(cloud->width >> 1) - 0.5f;
   float cy = ps->get<double>("depth_camera_cy") > 0 ? ps->get<double>("depth_camera_cy") : cam_info->K[5]; //(cloud->width >> 1) - 0.5f;
+
+  // Use extrinsics parameters ?
+  bool default_extrinsics = ps->get<bool>("extcalib_allready");
+  float rx = ps->get<double>("extcalib_rx");
+  float ry = ps->get<double>("extcalib_ry");
+  float rz = ps->get<double>("extcalib_rz");
+  float tx = ps->get<double>("extcalib_tx");
+  float ty = ps->get<double>("extcalib_ty");
+  float tz = ps->get<double>("extcalib_tz");
+  
+  // Rotation angle is norm of [rx, ry, rz]^T 
+  double theta = sqrt(rx*rx+ry*ry+rz*rz);
+  double ct = cos(theta);
+  double st = sin(theta);
+
+  // Rotation axis is normalized [rx, ry, rz]^T
+  rx/=theta; ry/=theta; rz/=theta;
+
+  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz, theta);
+  Eigen::Matrix4f eigen_transform;
+  pcl_ros::transformAsMatrix(transformation, eigen_transform); 
+  Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
+  Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
+
   int data_skip_step = ParameterServer::instance()->get<int>("cloud_creation_skip_step");
   if(depth_img.rows % data_skip_step != 0 || depth_img.cols % data_skip_step != 0){
     ROS_WARN("The parameter cloud_creation_skip_step is not a divisor of the depth image dimensions. This will most likely crash the program!");
@@ -605,52 +650,112 @@ pointcloud_type* createXYZRGBPointCloud (const cv::Mat& depth_img,
   if(max_depth < 0.0) max_depth = std::numeric_limits<float>::infinity();
 
   pointcloud_type::iterator pt_iter = cloud->begin();
-  for (int v = 0; v < (int)rgb_img.rows; v += data_skip_step, color_idx += color_row_step, depth_idx += depth_row_step)
-  {
-    for (int u = 0; u < (int)rgb_img.cols; u += data_skip_step, color_idx += color_pix_step, depth_idx += depth_pix_step, ++pt_iter)
-    {
-      if(pt_iter == cloud->end()){
-        break;
-      }
-      point_type& pt = *pt_iter;
-      if(u < 0 || v < 0 || u >= depth_img.cols || v >= depth_img.rows){
-        pt.x = pt.y = pt.z = std::numeric_limits<float>::quiet_NaN();
-        continue;
-      }
 
-      float Z = depth_img.at<float>(depth_idx) * depth_scaling;
+  if(default_extrinsics) {
+	  for (int v = 0; v < (int)rgb_img.rows; v += data_skip_step, color_idx += color_row_step, depth_idx += depth_row_step)
+	  {
+		  for (int u = 0; u < (int)rgb_img.cols; u += data_skip_step, color_idx += color_pix_step, depth_idx += depth_pix_step, ++pt_iter)
+		  {
+			  if(pt_iter == cloud->end()){
+				  break;
+			  }
+			  point_type& pt = *pt_iter;
+			  if(u < 0 || v < 0 || u >= depth_img.cols || v >= depth_img.rows){
+				  pt.x = pt.y = pt.z = std::numeric_limits<float>::quiet_NaN();
+				  continue;
+			  }
 
-      // Check for invalid measurements
-      if (!(Z >= min_depth)) //Should also be trigger on NaN//std::isnan (Z))
-      {
-        pt.x = (u - cx) * 1.0 * fx; //FIXME: better solution as to act as at 1meter?
-        pt.y = (v - cy) * 1.0 * fy;
-        pt.z = std::numeric_limits<float>::quiet_NaN();
-      }
-      else // Fill in XYZ
-      {
-        pt.x = (u - cx) * Z * fx;
-        pt.y = (v - cy) * Z * fy;
-        pt.z = Z;
-      }
-      // Fill in color
-      RGBValue color;
-      if(color_idx > 0 && color_idx < rgb_img.total()*color_pix_step){ //Only necessary because of the color_idx offset 
-        if(pixel_data_size == 3){
-          color.Red   = rgb_img.at<uint8_t>(color_idx + red_idx);
-          color.Green = rgb_img.at<uint8_t>(color_idx + green_idx);
-          color.Blue  = rgb_img.at<uint8_t>(color_idx + blue_idx);
-        } else {
-          color.Red   = color.Green = color.Blue  = rgb_img.at<uint8_t>(color_idx);
-        }
-        color.Alpha = 0;
+			  float Z = depth_img.at<float>(depth_idx) * depth_scaling;
+
+			  // Check for invalid measurements
+			  if (!(Z >= min_depth)) //Should also be trigger on NaN//std::isnan (Z))
+			  {
+				  pt.x = (u - cx) * 1.0 * fx; //FIXME: better solution as to act as at 1meter?
+				  pt.y = (v - cy) * 1.0 * fy;
+				  pt.z = std::numeric_limits<float>::quiet_NaN();
+			  }
+			  else // Fill in XYZ
+			  {
+				  pt.x = (u - cx) * Z * fx;
+				  pt.y = (v - cy) * Z * fy;
+				  pt.z = Z;
+			  }
+			  // Fill in color
+			  RGBValue color;
+			  if(color_idx > 0 && color_idx < rgb_img.total()*color_pix_step){ //Only necessary because of the color_idx offset 
+				  if(pixel_data_size == 3){
+					  color.Red   = rgb_img.at<uint8_t>(color_idx + red_idx);
+					  color.Green = rgb_img.at<uint8_t>(color_idx + green_idx);
+					  color.Blue  = rgb_img.at<uint8_t>(color_idx + blue_idx);
+				  } else {
+					  color.Red   = color.Green = color.Blue  = rgb_img.at<uint8_t>(color_idx);
+				  }
+				  color.Alpha = 0;
 #ifndef RGB_IS_4TH_DIM
-        pt.rgb = color.float_value;
+				  pt.rgb = color.float_value;
 #else
-        pt.data[3] = color.float_value;
+				  pt.data[3] = color.float_value;
 #endif
-      }
-    }
+			  }
+		  }
+	  }
+  } else {
+	  for (int v = 0; v < (int)depth_img.rows; v += data_skip_step, depth_idx += depth_row_step)
+	  {
+		  for (int u = 0; u < (int)depth_img.cols; u += data_skip_step, depth_idx += depth_pix_step, ++pt_iter)
+		  {
+			  if(pt_iter == cloud->end()){
+				  break;
+			  }
+			  point_type& pt = *pt_iter;
+			  if(u < 0 || v < 0 || u >= depth_img.cols || v >= depth_img.rows){
+				  pt.x = pt.y = pt.z = std::numeric_limits<float>::quiet_NaN();
+				  continue;
+			  }
+
+			  float Z = depth_img.at<float>(depth_idx) * depth_scaling;
+			  
+			  Eigen::Vector3f cpt;
+			  Eigen::Vector3f transpt;
+
+			  // Check for invalid measurements
+			  if (!(Z >= min_depth)) //Should also be trigger on NaN//std::isnan (Z))
+			  {
+				  cpt << (u - cx) * 1.0 * fx      ,       (v - cy) * 1.0 * fy      ,       std::numeric_limits<float>::quiet_NaN();
+			  }
+			  else // Fill in XYZ
+			  {
+				  cpt << (u - cx) * Z * fx      ,       (v - cy) * Z * fy      ,       Z;
+			  }
+
+			  transpt = rot * cpt + trans;
+			  pt.x = cpt(0);
+			  pt.y = cpt(1);
+			  pt.z = cpt(2);
+
+			  RGBValue color;
+			  int cu, cv;
+			  cu = (int)(fx*transpt(0)/transpt(2)+cx);
+			  cv = (int)(fy*transpt(1)/transpt(2)+cy);
+			  color_idx = cu*rgb_img.cols*pixel_data_size+cv*pixel_data_size;			// Compute idx from XYZ point using intrinsics
+			  if(color_idx > 0 && color_idx < rgb_img.total()*color_pix_step){ //Only necessary because of the color_idx offset 
+				  if(pixel_data_size == 3){
+					  color.Red   = rgb_img.at<uint8_t>(color_idx + red_idx);
+					  color.Green = rgb_img.at<uint8_t>(color_idx + green_idx);
+					  color.Blue  = rgb_img.at<uint8_t>(color_idx + blue_idx);
+				  } else {
+					  color.Red   = color.Green = color.Blue  = rgb_img.at<uint8_t>(color_idx);
+				  }
+				  color.Alpha = 0;
+#ifndef RGB_IS_4TH_DIM
+				  pt.rgb = color.float_value;
+#else
+				  pt.data[3] = color.float_value;
+#endif
+			  }
+		  }
+	  }
+
   }
 
   return cloud;
