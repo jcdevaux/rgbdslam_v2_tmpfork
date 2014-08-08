@@ -44,6 +44,16 @@ void ParameterServer::defaultConfig() {
   addOption("depth_camera_cy",               static_cast<double> (-1.0),                "Vertical image center. Use negative value to get from CameraInfo");
   addOption("sigma_depth",                   static_cast<double> (0.01),                "Factor c for the standard deviation of depth measurements: sigma_Z = c * depth * depth. Khoshelham 2012 (0.001425) seems to be a bit overconfident.");
 
+  // Extrinsics parameters between depth and color camera
+  addOption("extcalib_allready",               static_cast<bool (true),                "Whether the color and depth images are already registered. false means you have to set up extrinsics parameters.");
+  addOption("extcalib_rx",               static_cast<double> (0.0),                "Rotation 1st parameter for extrinsic calibration between depth and color cameras.");
+  addOption("extcalib_ry",               static_cast<double> (0.0),                "Rotation 2nd parameter for extrinsic calibration between depth and color cameras.");
+  addOption("extcalib_rz",               static_cast<double> (0.0),                "Rotation 3rd parameter for extrinsic calibration between depth and color cameras.");
+  addOption("extcalib_tx",               static_cast<double> (0.0),                "Translation 1st parameter for extrinsic calibration between depth and color cameras.");
+  addOption("extcalib_ty",               static_cast<double> (0.0),                "Translation 2nd parameter for extrinsic calibration between depth and color cameras.");
+  addOption("extcalib_tz",               static_cast<double> (0.0),                "Translation 3rdt parameter for extrinsic calibration between depth and color cameras.");
+
+
   // Output data settings
   addOption("store_pointclouds",             static_cast<bool> (true),                  "If the point clouds are not needed online, setting this to false saves lots of memory ");
   addOption("individual_cloud_out_topic",    std::string("/rgbdslam/batch_clouds"),     "Use this topic when sending the individual clouds with the computed transforms, e.g. for octomap_server");
