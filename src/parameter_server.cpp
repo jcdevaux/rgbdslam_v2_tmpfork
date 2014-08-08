@@ -45,7 +45,7 @@ void ParameterServer::defaultConfig() {
   addOption("sigma_depth",                   static_cast<double> (0.01),                "Factor c for the standard deviation of depth measurements: sigma_Z = c * depth * depth. Khoshelham 2012 (0.001425) seems to be a bit overconfident.");
 
   // Extrinsics parameters between depth and color camera
-  addOption("extcalib_allready",               static_cast<bool (true),                "Whether the color and depth images are already registered. false means you have to set up extrinsics parameters.");
+  addOption("extcalib_allready",               static_cast<bool> (true),                "Whether the color and depth images are already registered. false means you have to set up extrinsics parameters.");
   addOption("extcalib_rx",               static_cast<double> (0.0),                "Rotation 1st parameter for extrinsic calibration between depth and color cameras.");
   addOption("extcalib_ry",               static_cast<double> (0.0),                "Rotation 2nd parameter for extrinsic calibration between depth and color cameras.");
   addOption("extcalib_rz",               static_cast<double> (0.0),                "Rotation 3rd parameter for extrinsic calibration between depth and color cameras.");
