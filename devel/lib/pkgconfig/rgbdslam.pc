@@ -1,0 +1,8 @@
+prefix=/home/devaux/rgbdslam_fork/rgbdslam_v2_tmpfork/devel
+
+Name: rgbdslam
+Description: Description of rgbdslam
+Version: 0.2.0
+Cflags: -I/home/devaux/rgbdslam_fork/rgbdslam_v2_tmpfork/devel/include
+Libs: -L/home/devaux/rgbdslam_fork/rgbdslam_v2_tmpfork/devel/lib 
+Requires: pcl_conversions pcl_ros roscpp sensor_msgs message_runtime std_msgs

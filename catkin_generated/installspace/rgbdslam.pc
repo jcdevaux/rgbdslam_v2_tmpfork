@@ -1,0 +1,8 @@
+prefix=/usr/local
+
+Name: rgbdslam
+Description: Description of rgbdslam
+Version: 0.2.0
+Cflags: -I/usr/local/include
+Libs: -L/usr/local/lib 
+Requires: pcl_conversions pcl_ros roscpp sensor_msgs message_runtime std_msgs

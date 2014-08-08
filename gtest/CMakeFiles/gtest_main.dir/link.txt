@@ -1,0 +1,1 @@
+/usr/bin/c++  -fPIC    -shared -Wl,-soname,libgtest_main.so -o /lib/libgtest_main.so CMakeFiles/gtest_main.dir/src/gtest_main.cc.o  -L/home/devaux/rgbdslam_fork/rgbdslam_v2_tmpfork/gtest/src -lpthread /lib/libgtest.so -lpthread -Wl,-rpath,/home/devaux/rgbdslam_fork/rgbdslam_v2_tmpfork/gtest/src 

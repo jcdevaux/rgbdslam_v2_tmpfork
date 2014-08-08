@@ -1,0 +1,29 @@
+<launch>
+
+  <node pkg="rgbdslam" type="rgbdslam" name="rgbdslam" cwd="node" required="true" output="screen"> 
+    <!-- Input data settings-->
+    <param name="config/topic_image_mono"              value="/camera/rgb/image_color"/> 
+    <param name="config/topic_image_depth"             value="/camera/depth/image"/>
+    <param name="config/topic_points"                  value=""/> <!--if empty, poincloud will be reconstructed from image and depth -->
+
+    <param name="config/encoding_bgr"			value="false"/>
+
+    <param name="config/extcalib_allready"                  value="false"/> <!--if true, all extrinsic parameters below will be ignored -->
+    <param name="config/extcalib_rx"                  value="0.0"/> <!-- Rotation between depth and color camera is defined using -->
+    <param name="config/extcalib_ry"                  value="0.0"/> <!-- a vector [rx, ry, rz]^T whom components are Euler rotation parameters -->
+    <param name="config/extcalib_rz"                  value="0.0"/> <!-- equivalent to [yaw, pitch, roll]^T -->
+    <param name="config/extcalib_tx"                  value="0.10"/> <!-- Translation vector is [tx, ty, tz]^T -->
+    <param name="config/extcalib_ty"                  value="0.10"/> 
+    <param name="config/extcalib_tz"                  value="0.10"/> <!-- All these values can be ignored depending on extcalib_allready parameter -->
+
+
+    <param name="config/feature_detector_type"         value="SURF"/><!-- also available: SIFT, SURF, GFTT (good features to track), ORB. -->
+    <param name="config/feature_extractor_type"        value="SURF"/><!-- also available: SIFT, SURF, SURF128 (extended SURF), ORB. -->
+    <param name="config/nn_distance_ratio"             value="0.75"/> <!-- Feature correspondence is valid if distance to nearest neighbour is smaller than this parameter times the distance to the 2nd neighbour -->
+    <param name="config/max_keypoints"                 value="400"/><!-- Extract no more than this many keypoints (not honored by SIFTGPU)-->
+    <param name="config/ransac_iterations"             value="100"/>
+    <param name="config/cloud_creation_skip_step"      value="10"/><!-- subsample the images' pixels (in both, width and height), when creating the cloud -->
+    <param name="config/data_skip_step"                value="1"/><!-- subsample the image frames (in time) -->
+  </node>
+</launch>
+

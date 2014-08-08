@@ -100,7 +100,7 @@ tf::Transform g2o2TF(const g2o::SE3Quat se3) {
     return result;
 }
 
-tf::Transform values2TF(float tx, float ty, float tz, float rx, float ry, float rz, float rw) {
+tf::Transform values2TF(float tx, float ty, float tz, float rx, float ry, float rz) {
     tf::Transform result;
     tf::Vector3 translation;
     translation.setX(tx);
@@ -108,10 +108,7 @@ tf::Transform values2TF(float tx, float ty, float tz, float rx, float ry, float 
     translation.setZ(tz);
 
     tf::Quaternion rotation;
-    rotation.setX(rx);
-    rotation.setY(ry);
-    rotation.setZ(rz);
-    rotation.setW(rw);
+    rotation.setEuler(rx, ry, rz);
 
     result.setOrigin(translation);
     result.setRotation(rotation);
@@ -600,15 +597,9 @@ pointcloud_type* createXYZRGBPointCloud (const cv::Mat& depth_img,
   float ty = ps->get<double>("extcalib_ty");
   float tz = ps->get<double>("extcalib_tz");
   
-  // Rotation angle is norm of [rx, ry, rz]^T 
-  double theta = sqrt(rx*rx+ry*ry+rz*rz);
-  double ct = cos(theta);
-  double st = sin(theta);
+  ROS_INFO_STREAM("Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
 
-  // Rotation axis is normalized [rx, ry, rz]^T
-  rx/=theta; ry/=theta; rz/=theta;
-
-  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz, theta);
+  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
   Eigen::Matrix4f eigen_transform;
   pcl_ros::transformAsMatrix(transformation, eigen_transform); 
   Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
@@ -652,6 +643,7 @@ pointcloud_type* createXYZRGBPointCloud (const cv::Mat& depth_img,
   pointcloud_type::iterator pt_iter = cloud->begin();
 
   if(default_extrinsics) {
+	ROS_INFO_STREAM("Ignoring extrinsics because depth and color images are already registered.");
 	  for (int v = 0; v < (int)rgb_img.rows; v += data_skip_step, color_idx += color_row_step, depth_idx += depth_row_step)
 	  {
 		  for (int u = 0; u < (int)rgb_img.cols; u += data_skip_step, color_idx += color_pix_step, depth_idx += depth_pix_step, ++pt_iter)
@@ -700,6 +692,7 @@ pointcloud_type* createXYZRGBPointCloud (const cv::Mat& depth_img,
 		  }
 	  }
   } else {
+	ROS_INFO_STREAM("Using extrinsics as specified in .launch file.");
 	  for (int v = 0; v < (int)depth_img.rows; v += data_skip_step, depth_idx += depth_row_step)
 	  {
 		  for (int u = 0; u < (int)depth_img.cols; u += data_skip_step, depth_idx += depth_pix_step, ++pt_iter)
@@ -728,31 +721,49 @@ pointcloud_type* createXYZRGBPointCloud (const cv::Mat& depth_img,
 				  cpt << (u - cx) * Z * fx      ,       (v - cy) * Z * fy      ,       Z;
 			  }
 
+//			  printTransform("Transformation", transformation);
+			
 			  transpt = rot * cpt + trans;
 			  pt.x = cpt(0);
 			  pt.y = cpt(1);
 			  pt.z = cpt(2);
 
+
+
 			  RGBValue color;
 			  int cu, cv;
-			  cu = (int)(fx*transpt(0)/transpt(2)+cx);
-			  cv = (int)(fy*transpt(1)/transpt(2)+cy);
-			  color_idx = cu*rgb_img.cols*pixel_data_size+cv*pixel_data_size;			// Compute idx from XYZ point using intrinsics
-			  if(color_idx > 0 && color_idx < rgb_img.total()*color_pix_step){ //Only necessary because of the color_idx offset 
-				  if(pixel_data_size == 3){
-					  color.Red   = rgb_img.at<uint8_t>(color_idx + red_idx);
-					  color.Green = rgb_img.at<uint8_t>(color_idx + green_idx);
-					  color.Blue  = rgb_img.at<uint8_t>(color_idx + blue_idx);
-				  } else {
-					  color.Red   = color.Green = color.Blue  = rgb_img.at<uint8_t>(color_idx);
-				  }
-				  color.Alpha = 0;
+			  cu = (int)(transpt(0)/transpt(2)/fx+cx);
+			  if(cu>=0 && cu<rgb_img.cols)
+			  {
+				  cv = (int)(transpt(1)/transpt(2)/fy+cy);
+				  if(cv>=0 && cv<rgb_img.rows)
+				  {
+					  color_idx = cv*rgb_img.cols*pixel_data_size+cu*pixel_data_size;			// Compute idx from XYZ point using intrinsics
+
+					  ROS_INFO_STREAM("Pt : " << pt.x << " " << pt.y << " " << pt.z << " / Pt transformed : " << transpt(0) << " " << transpt(1) << " " << transpt(2));
+					  ROS_INFO_STREAM("fx fy : " << fx << " " << fy << " cx cy" << cx << " " << cy);
+					  ROS_INFO_STREAM("(u,v) "<<u << " "<<v << " / (cu,cv) " << cu << " " << cv << " / idx : " << color_idx);
+					  if(color_idx > 0 && color_idx < rgb_img.total()*color_pix_step){ //Only necessary because of the color_idx offset 
+						  if(pixel_data_size == 3){
+							  color.Red   = rgb_img.at<uint8_t>(color_idx + red_idx);
+							  color.Green = rgb_img.at<uint8_t>(color_idx + green_idx);
+							  color.Blue  = rgb_img.at<uint8_t>(color_idx + blue_idx);
+						  } else {
+							  color.Red   = color.Green = color.Blue  = rgb_img.at<uint8_t>(color_idx);
+						  }
+						  color.Alpha = 0;
 #ifndef RGB_IS_4TH_DIM
-				  pt.rgb = color.float_value;
+						  pt.rgb = color.float_value;
 #else
-				  pt.data[3] = color.float_value;
+						  pt.data[3] = color.float_value;
 #endif
+						  continue;
+					  }
+				  }
 			  }
+			  pt.x = std::numeric_limits<float>::quiet_NaN();
+			  pt.y = std::numeric_limits<float>::quiet_NaN();
+			  pt.z = std::numeric_limits<float>::quiet_NaN();
 		  }
 	  }
 
