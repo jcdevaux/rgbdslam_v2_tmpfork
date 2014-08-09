@@ -740,9 +740,9 @@ pointcloud_type* createXYZRGBPointCloud (const cv::Mat& depth_img,
 				  {
 					  color_idx = cv*rgb_img.cols*pixel_data_size+cu*pixel_data_size;			// Compute idx from XYZ point using intrinsics
 
-					  ROS_INFO_STREAM("Pt : " << pt.x << " " << pt.y << " " << pt.z << " / Pt transformed : " << transpt(0) << " " << transpt(1) << " " << transpt(2));
-					  ROS_INFO_STREAM("fx fy : " << fx << " " << fy << " cx cy" << cx << " " << cy);
-					  ROS_INFO_STREAM("(u,v) "<<u << " "<<v << " / (cu,cv) " << cu << " " << cv << " / idx : " << color_idx);
+					  //ROS_INFO_STREAM("Pt : " << pt.x << " " << pt.y << " " << pt.z << " / Pt transformed : " << transpt(0) << " " << transpt(1) << " " << transpt(2));
+					  //ROS_INFO_STREAM("fx fy : " << fx << " " << fy << " cx cy" << cx << " " << cy);
+					  //ROS_INFO_STREAM("(u,v) "<<u << " "<<v << " / (cu,cv) " << cu << " " << cv << " / idx : " << color_idx);
 					  if(color_idx > 0 && color_idx < rgb_img.total()*color_pix_step){ //Only necessary because of the color_idx offset 
 						  if(pixel_data_size == 3){
 							  color.Red   = rgb_img.at<uint8_t>(color_idx + red_idx);

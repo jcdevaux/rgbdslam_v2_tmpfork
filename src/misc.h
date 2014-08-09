@@ -37,6 +37,9 @@ void printQMatrix4x4(const char* name, const QMatrix4x4& m);
 QMatrix4x4    g2o2QMatrix(const g2o::SE3Quat se3) ;
 ///Conversion Function
 tf::Transform g2o2TF(     const g2o::SE3Quat se3) ;
+///Conversion Function
+tf::Transform values2TF(float tx, float ty, float tz, float rx, float ry, float rz);
+
 template <typename T >
 QMatrix4x4 eigenTF2QMatrix(const T& transf) 
 {

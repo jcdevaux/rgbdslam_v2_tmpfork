@@ -48,6 +48,7 @@
 
 //#include <iostream>
 #include "misc.h"
+#include <pcl_ros/transforms.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/impl/voxel_grid.hpp>
 #include <opencv/highgui.h>
@@ -608,6 +609,26 @@ void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
   float fy = 1./ (ps->get<double>("depth_camera_fy") > 0 ? ps->get<double>("depth_camera_fy") : cam_info->K[4]); //(cloud->width >> 1) - 0.5f;
   float cx = ps->get<double>("depth_camera_cx") > 0 ? ps->get<double>("depth_camera_cx") : cam_info->K[2]; //(cloud->width >> 1) - 0.5f;
   float cy = ps->get<double>("depth_camera_cy") > 0 ? ps->get<double>("depth_camera_cy") : cam_info->K[5]; //(cloud->width >> 1) - 0.5f;
+
+
+  // Use extrinsics parameters ?
+  bool default_extrinsics = ps->get<bool>("extcalib_allready");
+  float rx = ps->get<double>("extcalib_rx");
+  float ry = ps->get<double>("extcalib_ry");
+  float rz = ps->get<double>("extcalib_rz");
+  float tx = ps->get<double>("extcalib_tx");
+  float ty = ps->get<double>("extcalib_ty");
+  float tz = ps->get<double>("extcalib_tz");
+  
+  ROS_INFO_STREAM("ProjectTo3DSiftGPU : Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
+
+  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
+  Eigen::Matrix4f eigen_transform;
+  pcl_ros::transformAsMatrix(transformation, eigen_transform); 
+  Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
+  Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
+
+
   cv::Point2f p2d;
 
   if(feature_locations_3d.size()){
@@ -642,7 +663,19 @@ void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
       y = (p2d.y - cy) * Z * fy;
     }
 
-    feature_locations_3d.push_back(Eigen::Vector4f(x,y, Z, 1.0));
+    if(default_extrinsics)
+    {
+    	feature_locations_3d.push_back(Eigen::Vector4f(x,y, Z, 1.0));
+    }
+    else
+    {
+    	Eigen::Vector3f point3f;
+	point3f << x , y , Z;
+	Eigen::Vector3f transpt;
+	transpt = rot * point3f + trans;
+	feature_locations_3d.push_back(Eigen::Vector4f(transpt(0), transpt(1), transpt(2), 1.0));
+    }
+
     featuresUsed.push_back(index);  //save id for constructing the descriptor matrix
     i++; //Only increment if no element is removed from vector
     if(feature_locations_3d.size() >= max_keyp) break;
@@ -701,6 +734,28 @@ void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
     feature_locations_3d.clear();
   }
 
+  ParameterServer* ps = ParameterServer::instance();
+  // Use extrinsics parameters ?
+  bool default_extrinsics = ps->get<bool>("extcalib_allready");
+  float rx = ps->get<double>("extcalib_rx");
+  float ry = ps->get<double>("extcalib_ry");
+  float rz = ps->get<double>("extcalib_rz");
+  float tx = ps->get<double>("extcalib_tx");
+  float ty = ps->get<double>("extcalib_ty");
+  float tz = ps->get<double>("extcalib_tz");
+  
+  ROS_INFO_STREAM("ProjectTo3DSiftGPU : Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
+
+  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
+  Eigen::Matrix4f eigen_transform;
+  pcl_ros::transformAsMatrix(transformation, eigen_transform); 
+  Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
+  Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
+
+
+
+
+
   std::list<int> featuresUsed;
 
   int index = -1;
@@ -726,7 +781,20 @@ void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
       continue;
     }
 #endif
-    feature_locations_3d.push_back(Eigen::Vector4f(p3d.x, p3d.y, p3d.z, 1));
+
+    if(default_extrinsics)
+    {
+	    feature_locations_3d.push_back(Eigen::Vector4f(p3d.x, p3d.y, p3d.z, 1));
+    }
+    else
+    {
+	    Eigen::Vector3f point3f;
+	    point3f << p3d.x , p3d.y , p3d.z;
+            Eigen::Vector3f transpt;
+	    transpt = rot * point3f + trans;
+    	    feature_locations_3d.push_back(Eigen::Vector4f(transpt(0), transpt(1), transpt(2), 1.0));
+    }
+
     i++; //Only increment if no element is removed from vector
     featuresUsed.push_back(index);  //save id for constructing the descriptor matrix
     if(feature_locations_3d.size() >= max_keyp) break;
@@ -765,6 +833,33 @@ void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
     feature_locations_3d.clear();
   }
 
+
+  ParameterServer* ps = ParameterServer::instance();
+
+
+  // Use extrinsics parameters ?
+  bool default_extrinsics = ps->get<bool>("extcalib_allready");
+  float rx = ps->get<double>("extcalib_rx");
+  float ry = ps->get<double>("extcalib_ry");
+  float rz = ps->get<double>("extcalib_rz");
+  float tx = ps->get<double>("extcalib_tx");
+  float ty = ps->get<double>("extcalib_ty");
+  float tz = ps->get<double>("extcalib_tz");
+  
+  ROS_INFO_STREAM("ProjectTo3D 2 : Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
+
+  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
+  Eigen::Matrix4f eigen_transform;
+  pcl_ros::transformAsMatrix(transformation, eigen_transform); 
+  Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
+  Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
+
+
+
+
+
+
+
   for(unsigned int i = 0; i < feature_locations_2d.size(); /*increment at end of loop*/){
     p2d = feature_locations_2d[i].pt;
     if (p2d.x >= point_cloud->width || p2d.x < 0 ||
@@ -785,7 +880,20 @@ void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
       continue;
     }
 
-    feature_locations_3d.push_back(Eigen::Vector4f(p3d.x, p3d.y, p3d.z, 1.0));
+
+    if(default_extrinsics)
+    {
+	    feature_locations_3d.push_back(Eigen::Vector4f(p3d.x, p3d.y, p3d.z, 1));
+    }
+    else
+    {
+	    Eigen::Vector3f point3f;
+	    point3f << p3d.x , p3d.y , p3d.z;
+            Eigen::Vector3f transpt;
+	    transpt = rot * point3f + trans;
+    	    feature_locations_3d.push_back(Eigen::Vector4f(transpt(0), transpt(1), transpt(2), 1.0));
+    }
+
     i++; //Only increment if no element is removed from vector
     if(feature_locations_3d.size() >= max_keyp) break;
   }
@@ -812,13 +920,31 @@ void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
   float fy = 1./ (ps->get<double>("depth_camera_fy") > 0 ? ps->get<double>("depth_camera_fy") : cam_info->K[4]); //(cloud->width >> 1) - 0.5f;
   float cx = ps->get<double>("depth_camera_cx") > 0 ? ps->get<double>("depth_camera_cx") : cam_info->K[2]; //(cloud->width >> 1) - 0.5f;
   float cy = ps->get<double>("depth_camera_cy") > 0 ? ps->get<double>("depth_camera_cy") : cam_info->K[5]; //(cloud->width >> 1) - 0.5f;
-  /*
-  float cx = 325.1;//cam_info->K[2]; //(cloud->width >> 1) - 0.5f;
-  float cy = 249.7;//cam_info->K[5]; //(cloud->height >> 1) - 0.5f;
-  float fx = 1.0/521.0;//1.0f / cam_info->K[0]; 
-  float fy = 1.0/521.0;//1.0f / cam_info->K[4]; 
-  */
-  cv::Point2f p2d;
+  
+
+
+  // Use extrinsics parameters ?
+  bool default_extrinsics = ps->get<bool>("extcalib_allready");
+  float rx = ps->get<double>("extcalib_rx");
+  float ry = ps->get<double>("extcalib_ry");
+  float rz = ps->get<double>("extcalib_rz");
+  float tx = ps->get<double>("extcalib_tx");
+  float ty = ps->get<double>("extcalib_ty");
+  float tz = ps->get<double>("extcalib_tz");
+  
+  ROS_INFO_STREAM("ProjectTo3D 2 : Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
+
+  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
+  Eigen::Matrix4f eigen_transform;
+  pcl_ros::transformAsMatrix(transformation, eigen_transform); 
+  Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
+  Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
+
+
+
+
+
+cv::Point2f p2d;
 
   if(feature_locations_3d.size()){
     ROS_INFO("There is already 3D Information in the FrameInfo, clearing it");
@@ -851,7 +977,21 @@ void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
     x = (p2d.x - cx) * Z * fx;
     y = (p2d.y - cy) * Z * fy;
 
-    feature_locations_3d.push_back(Eigen::Vector4f(x,y, Z, 1.0));
+  
+    if(default_extrinsics)
+    {
+    	feature_locations_3d.push_back(Eigen::Vector4f(x,y, Z, 1.0));
+    }
+    else
+    {
+    	Eigen::Vector3f point3f;
+	point3f << x , y , Z;
+	Eigen::Vector3f transpt;
+	transpt = rot * point3f + trans;
+	feature_locations_3d.push_back(Eigen::Vector4f(transpt(0), transpt(1), transpt(2), 1.0));
+    }
+
+
     i++; //Only increment if no element is removed from vector
     if(feature_locations_3d.size() >= max_keyp) break;
   }

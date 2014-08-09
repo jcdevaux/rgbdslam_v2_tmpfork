@@ -12,9 +12,9 @@
     <param name="config/extcalib_rx"                  value="0.0"/> <!-- Rotation between depth and color camera is defined using -->
     <param name="config/extcalib_ry"                  value="0.0"/> <!-- a vector [rx, ry, rz]^T whom components are Euler rotation parameters -->
     <param name="config/extcalib_rz"                  value="0.0"/> <!-- equivalent to [yaw, pitch, roll]^T -->
-    <param name="config/extcalib_tx"                  value="0.10"/> <!-- Translation vector is [tx, ty, tz]^T -->
-    <param name="config/extcalib_ty"                  value="0.10"/> 
-    <param name="config/extcalib_tz"                  value="0.10"/> <!-- All these values can be ignored depending on extcalib_allready parameter -->
+    <param name="config/extcalib_tx"                  value="0.0"/> <!-- Translation vector is [tx, ty, tz]^T -->
+    <param name="config/extcalib_ty"                  value="0.0"/> 
+    <param name="config/extcalib_tz"                  value="0.0"/> <!-- All these values can be ignored depending on extcalib_allready parameter -->
 
 
     <param name="config/feature_detector_type"         value="SURF"/><!-- also available: SIFT, SURF, GFTT (good features to track), ORB. -->
