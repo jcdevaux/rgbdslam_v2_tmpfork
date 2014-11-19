@@ -61,6 +61,68 @@
 QMutex Node::gicp_mutex;
 QMutex Node::siftgpu_mutex;
 
+
+
+cv::Mat registeredDepth;
+void createRegisteredImageUsingExtrinsics(const cv::Mat& depth, const sensor_msgs::CameraInfoConstPtr& cam_info)
+{
+	ParameterServer* ps = ParameterServer::instance();
+	double depth_scaling = ps->get<double>("depth_scaling_factor");
+	
+	//principal point and focal lengths:
+	float fx = 1./ (ps->get<double>("depth_camera_fx") > 0 ? ps->get<double>("depth_camera_fx") : cam_info->K[0]); //(cloud->width >> 1) - 0.5f;
+	float fy = 1./ (ps->get<double>("depth_camera_fy") > 0 ? ps->get<double>("depth_camera_fy") : cam_info->K[4]); //(cloud->width >> 1) - 0.5f;
+	float cx = ps->get<double>("depth_camera_cx") > 0 ? ps->get<double>("depth_camera_cx") : cam_info->K[2]; //(cloud->width >> 1) - 0.5f;
+	float cy = ps->get<double>("depth_camera_cy") > 0 ? ps->get<double>("depth_camera_cy") : cam_info->K[5]; //(cloud->width >> 1) - 0.5f;
+  
+	// Use extrinsics parameters ?
+	bool default_extrinsics = ps->get<bool>("extcalib_allready");
+	float rx = ps->get<double>("extcalib_rx");
+	float ry = ps->get<double>("extcalib_ry");
+	float rz = ps->get<double>("extcalib_rz");
+	float tx = ps->get<double>("extcalib_tx");
+	float ty = ps->get<double>("extcalib_ty");
+	float tz = ps->get<double>("extcalib_tz");
+
+	ROS_INFO_STREAM("CreateRegisteredImageUsingExtrinsics : Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
+
+	tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
+	Eigen::Matrix4f eigen_transform;
+	pcl_ros::transformAsMatrix(transformation, eigen_transform); 
+	Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
+	Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
+
+	registeredDepth = cv::Mat::zeros(depth.rows, depth.cols, depth.type());
+	
+	Eigen::Vector3f opt;
+	Eigen::Vector3f tpt;
+	for(int v = 0; v < (int)depth.rows; v += 1)
+	{
+		for(int u = 0; u < (int)depth.cols; u +=1)
+		{	
+			int depth_idx = v*depth.cols+u;
+			float Z = depth.at<float>(depth_idx)*depth_scaling;
+			opt << (u - cx)*Z*fx , (v-cy)*Z*fy , Z;
+			tpt = rot * opt + trans;
+			int tu = (int)(tpt(0)/(tpt(2)*fx)+cx);
+			int tv = (int)(tpt(1)/(tpt(2)*fy)+cy);
+			if(tv>=0 && tv<depth.rows) 
+			{
+				if(tu>=0 && tu<depth.cols)
+				{
+					registeredDepth.at<float>(v, u)=tpt(2)/depth_scaling;	
+					//ROS_WARN_STREAM("(u,v,Z)->(u',v',Z) : ("<<u<<","<<v<<","<<depth.at<float>(depth_idx)<<")->("<<tu<<","<<tv<<","<<registeredDepth.at<float>(v,u)<<")");
+					continue;
+				}
+			}
+			registeredDepth.at<float>(v,u)=std::numeric_limits<float>::quiet_NaN();
+		}
+	}
+}
+
+
+
+
 //!Construct node without precomputed point cloud. Computes the point cloud on
 //!demand, possibly subsampled
 Node::Node(const cv::Mat& visual, 
@@ -611,24 +673,6 @@ void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
   float cy = ps->get<double>("depth_camera_cy") > 0 ? ps->get<double>("depth_camera_cy") : cam_info->K[5]; //(cloud->width >> 1) - 0.5f;
 
 
-  // Use extrinsics parameters ?
-  bool default_extrinsics = ps->get<bool>("extcalib_allready");
-  float rx = ps->get<double>("extcalib_rx");
-  float ry = ps->get<double>("extcalib_ry");
-  float rz = ps->get<double>("extcalib_rz");
-  float tx = ps->get<double>("extcalib_tx");
-  float ty = ps->get<double>("extcalib_ty");
-  float tz = ps->get<double>("extcalib_tz");
-  
-  ROS_INFO_STREAM("ProjectTo3DSiftGPU : Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
-
-  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
-  Eigen::Matrix4f eigen_transform;
-  pcl_ros::transformAsMatrix(transformation, eigen_transform); 
-  Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
-  Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
-
-
   cv::Point2f p2d;
 
   if(feature_locations_3d.size()){
@@ -663,18 +707,7 @@ void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
       y = (p2d.y - cy) * Z * fy;
     }
 
-    if(default_extrinsics)
-    {
-    	feature_locations_3d.push_back(Eigen::Vector4f(x,y, Z, 1.0));
-    }
-    else
-    {
-    	Eigen::Vector3f point3f;
-	point3f << x , y , Z;
-	Eigen::Vector3f transpt;
-	transpt = rot * point3f + trans;
-	feature_locations_3d.push_back(Eigen::Vector4f(transpt(0), transpt(1), transpt(2), 1.0));
-    }
+    feature_locations_3d.push_back(Eigen::Vector4f(x,y, Z, 1.0));
 
     featuresUsed.push_back(index);  //save id for constructing the descriptor matrix
     i++; //Only increment if no element is removed from vector
@@ -734,28 +767,6 @@ void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
     feature_locations_3d.clear();
   }
 
-  ParameterServer* ps = ParameterServer::instance();
-  // Use extrinsics parameters ?
-  bool default_extrinsics = ps->get<bool>("extcalib_allready");
-  float rx = ps->get<double>("extcalib_rx");
-  float ry = ps->get<double>("extcalib_ry");
-  float rz = ps->get<double>("extcalib_rz");
-  float tx = ps->get<double>("extcalib_tx");
-  float ty = ps->get<double>("extcalib_ty");
-  float tz = ps->get<double>("extcalib_tz");
-  
-  ROS_INFO_STREAM("ProjectTo3DSiftGPU : Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
-
-  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
-  Eigen::Matrix4f eigen_transform;
-  pcl_ros::transformAsMatrix(transformation, eigen_transform); 
-  Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
-  Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
-
-
-
-
-
   std::list<int> featuresUsed;
 
   int index = -1;
@@ -782,19 +793,8 @@ void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
     }
 #endif
 
-    if(default_extrinsics)
-    {
-	    feature_locations_3d.push_back(Eigen::Vector4f(p3d.x, p3d.y, p3d.z, 1));
-    }
-    else
-    {
-	    Eigen::Vector3f point3f;
-	    point3f << p3d.x , p3d.y , p3d.z;
-            Eigen::Vector3f transpt;
-	    transpt = rot * point3f + trans;
-    	    feature_locations_3d.push_back(Eigen::Vector4f(transpt(0), transpt(1), transpt(2), 1.0));
-    }
-
+    feature_locations_3d.push_back(Eigen::Vector4f(p3d.x, p3d.y, p3d.z, 1));
+    
     i++; //Only increment if no element is removed from vector
     featuresUsed.push_back(index);  //save id for constructing the descriptor matrix
     if(feature_locations_3d.size() >= max_keyp) break;
@@ -833,33 +833,6 @@ void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
     feature_locations_3d.clear();
   }
 
-
-  ParameterServer* ps = ParameterServer::instance();
-
-
-  // Use extrinsics parameters ?
-  bool default_extrinsics = ps->get<bool>("extcalib_allready");
-  float rx = ps->get<double>("extcalib_rx");
-  float ry = ps->get<double>("extcalib_ry");
-  float rz = ps->get<double>("extcalib_rz");
-  float tx = ps->get<double>("extcalib_tx");
-  float ty = ps->get<double>("extcalib_ty");
-  float tz = ps->get<double>("extcalib_tz");
-  
-  ROS_INFO_STREAM("ProjectTo3D 2 : Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
-
-  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
-  Eigen::Matrix4f eigen_transform;
-  pcl_ros::transformAsMatrix(transformation, eigen_transform); 
-  Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
-  Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
-
-
-
-
-
-
-
   for(unsigned int i = 0; i < feature_locations_2d.size(); /*increment at end of loop*/){
     p2d = feature_locations_2d[i].pt;
     if (p2d.x >= point_cloud->width || p2d.x < 0 ||
@@ -881,18 +854,7 @@ void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
     }
 
 
-    if(default_extrinsics)
-    {
-	    feature_locations_3d.push_back(Eigen::Vector4f(p3d.x, p3d.y, p3d.z, 1));
-    }
-    else
-    {
-	    Eigen::Vector3f point3f;
-	    point3f << p3d.x , p3d.y , p3d.z;
-            Eigen::Vector3f transpt;
-	    transpt = rot * point3f + trans;
-    	    feature_locations_3d.push_back(Eigen::Vector4f(transpt(0), transpt(1), transpt(2), 1.0));
-    }
+    feature_locations_3d.push_back(Eigen::Vector4f(p3d.x, p3d.y, p3d.z, 1));
 
     i++; //Only increment if no element is removed from vector
     if(feature_locations_3d.size() >= max_keyp) break;
@@ -902,6 +864,8 @@ void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
   feature_locations_2d.resize(feature_locations_3d.size());
   ROS_INFO("Feature 2d size: %zu, 3D: %zu", feature_locations_2d.size(), feature_locations_3d.size());
 }
+
+
 
 void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
                        std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f> >& feature_locations_3d,
@@ -914,34 +878,20 @@ void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
   double depth_scaling = ps->get<double>("depth_scaling_factor");
   size_t max_keyp = ps->get<int>("max_keypoints");
   double maximum_depth = ps->get<double>("maximum_depth");
+  double min_depth = ps->get<double>("minimum_depth");
   float x,y;//temp point, 
   //principal point and focal lengths:
   float fx = 1./ (ps->get<double>("depth_camera_fx") > 0 ? ps->get<double>("depth_camera_fx") : cam_info->K[0]); //(cloud->width >> 1) - 0.5f;
   float fy = 1./ (ps->get<double>("depth_camera_fy") > 0 ? ps->get<double>("depth_camera_fy") : cam_info->K[4]); //(cloud->width >> 1) - 0.5f;
   float cx = ps->get<double>("depth_camera_cx") > 0 ? ps->get<double>("depth_camera_cx") : cam_info->K[2]; //(cloud->width >> 1) - 0.5f;
   float cy = ps->get<double>("depth_camera_cy") > 0 ? ps->get<double>("depth_camera_cy") : cam_info->K[5]; //(cloud->width >> 1) - 0.5f;
-  
+ 
 
-
-  // Use extrinsics parameters ?
   bool default_extrinsics = ps->get<bool>("extcalib_allready");
-  float rx = ps->get<double>("extcalib_rx");
-  float ry = ps->get<double>("extcalib_ry");
-  float rz = ps->get<double>("extcalib_rz");
-  float tx = ps->get<double>("extcalib_tx");
-  float ty = ps->get<double>("extcalib_ty");
-  float tz = ps->get<double>("extcalib_tz");
-  
-  ROS_INFO_STREAM("ProjectTo3D 2 : Registered " << default_extrinsics << " : Rotation "<< rx << " " << ry << " " << rz <<" : Translation " << tx << " " << ty << " " << tz);
+  ROS_INFO_STREAM("ProjectTo3D 2 : Registered " << default_extrinsics);
 
-  tf::Transform transformation = values2TF(tx, ty, tz, rx, ry, rz);
-  Eigen::Matrix4f eigen_transform;
-  pcl_ros::transformAsMatrix(transformation, eigen_transform); 
-  Eigen::Matrix3f rot   = eigen_transform.block<3, 3> (0, 0);
-  Eigen::Vector3f trans = eigen_transform.block<3, 1> (0, 3);
-
-
-
+  if(!default_extrinsics)
+	  createRegisteredImageUsingExtrinsics(depth, cam_info);	
 
 
 cv::Point2f p2d;
@@ -960,14 +910,47 @@ cv::Point2f p2d;
       feature_locations_2d.erase(feature_locations_2d.begin()+i);
       continue;
     }
+    
+
     float Z;
     if(use_feature_min_depth){
-      Z = getMinDepthInNeighborhood(depth, p2d, feature_locations_2d[i].size);
+	    if(default_extrinsics)
+	    {
+		    Z = getMinDepthInNeighborhood(depth, p2d, feature_locations_2d[i].size);
+	    }
+	    else
+	    {
+		    float zd = getMinDepthInNeighborhood(depth, p2d, feature_locations_2d[i].size);
+		    float zr = registeredDepth.at<float>(p2d.y, p2d.x) * depth_scaling;
+		    float zn = getMinDepthInNeighborhood(registeredDepth, p2d, feature_locations_2d[i].size);
+		    if(abs(zd-zr)>0.0001)
+			    ROS_WARN_STREAM("NOT EQUAL DEPTH : " << zd << " " << zr << " " << zn << " at " << p2d.x << ", " << p2d.y);
+		    if(std::isnan(zr))
+			    Z = getMinDepthInNeighborhood(registeredDepth, p2d, feature_locations_2d[i].size);
+		    else
+			    Z = zr;
+	    }
     } else {
-      Z = depth.at<float>(p2d.y, p2d.x) * depth_scaling;
+	    if(default_extrinsics)
+	    {
+		    Z = depth.at<float>(p2d.y, p2d.x) * depth_scaling;
+	    }
+	    else
+	    {
+		    float zd = depth.at<float>(p2d.y, p2d.x) * depth_scaling;
+		    float zr = registeredDepth.at<float>(p2d.y, p2d.x) * depth_scaling;
+		    if(abs(zd-zr)>0.0001)
+			    ROS_WARN_STREAM("NOT EQUAL DEPTH : " << zd << " " << zr << " at " << p2d.x << ", " << p2d.y);
+
+		    Z = registeredDepth.at<float>(p2d.y, p2d.x) * depth_scaling;
+	    }	
     }
+
+    //ROS_WARN_STREAM("Depth : "<<depth.at<float>(p2d.y, p2d.x) * depth_scaling);
+    //ROS_WARN_STREAM("RDept : "<<registeredDepth.at<float>(p2d.y, p2d.x) * depth_scaling);
+
     // Check for invalid measurements
-    if(std::isnan (Z))
+    if(std::isnan (Z))// || !(Z>=min_depth))
     {
       ROS_DEBUG("Feature %d has been extracted at NaN depth. Omitting", i);
       //FIXME Use parameter here to choose whether to use
@@ -977,20 +960,7 @@ cv::Point2f p2d;
     x = (p2d.x - cx) * Z * fx;
     y = (p2d.y - cy) * Z * fy;
 
-  
-    if(default_extrinsics)
-    {
-    	feature_locations_3d.push_back(Eigen::Vector4f(x,y, Z, 1.0));
-    }
-    else
-    {
-    	Eigen::Vector3f point3f;
-	point3f << x , y , Z;
-	Eigen::Vector3f transpt;
-	transpt = rot * point3f + trans;
-	feature_locations_3d.push_back(Eigen::Vector4f(transpt(0), transpt(1), transpt(2), 1.0));
-    }
-
+    feature_locations_3d.push_back(Eigen::Vector4f(x,y, Z, 1.0));
 
     i++; //Only increment if no element is removed from vector
     if(feature_locations_3d.size() >= max_keyp) break;
